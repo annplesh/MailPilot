@@ -1,0 +1,27 @@
+# =============================================================================
+# requirements.txt — Pinned dependencies for MailPilot
+# =============================================================================
+# Install with: pip install -r requirements.txt
+# Requires Python 3.14+
+# =============================================================================
+
+# Telegram bot framework — async, ships with built-in JobQueue (APScheduler)
+python-telegram-bot==22.7
+
+# Anthropic Claude SDK — AI email scoring with prompt caching support
+anthropic==0.101.0
+
+# Gmail API client — listing, fetching, and modifying Gmail messages
+google-api-python-client==2.172.0
+
+# Google OAuth2 — browser-based consent flow for first-time Gmail authorization
+google-auth-oauthlib==1.2.1
+
+# Google auth HTTP transport — used for silent token refresh
+google-auth-httplib2==0.2.0
+
+# Environment variable loader — reads .env file into os.environ at startup
+python-dotenv==1.2.2
+
+# HTTP client — transitive dependency of anthropic; pinned for reproducibility
+httpx==0.28.1

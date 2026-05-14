@@ -1,0 +1,36 @@
+# Secret files — never upload to GitHub
+.env
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Tokens directory
+tokens/
+
+# Private notes
+NOTES.md
+
+# Google OAuth credentials
+credentials.json
