@@ -193,7 +193,7 @@ async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Setup required. Run /setup first.")
         return
 
-    await update.message.reply_text("Checking your inbox...")
+    await update.message.reply_text("⏳ Checking your inbox...")
 
     try:
         await asyncio.to_thread(
@@ -201,24 +201,23 @@ async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             telegram_id,
             user["filter_keywords"],
         )
+        alert_count  = await _send_alerts(telegram_id, context.bot)
+        digest_count = await _send_digest(telegram_id, context.bot)
+        total        = alert_count + digest_count
     except RefreshError:
         await update.message.reply_text(
-            "Your Gmail authorization has expired. Run /setup to reconnect."
+            "❌ Could not connect to Gmail. Please run /setup again."
         )
         return
     except Exception as e:
-        logger.error("fetch_and_store_emails failed for user %s: %s", telegram_id, e)
+        logger.error("digest failed for user %s: %s", telegram_id, e)
         await update.message.reply_text(
-            "Could not fetch emails. Check your Gmail connection and try again."
+            "❌ Could not fetch emails. Try /setup to reconnect."
         )
         return
 
-    alert_count  = await _send_alerts(telegram_id, context.bot)
-    digest_count = await _send_digest(telegram_id, context.bot)
-    total        = alert_count + digest_count
-
     if total == 0:
-        await update.message.reply_text("No new important emails since the last digest.")
+        await update.message.reply_text("\U0001f4ed No new important emails.")
     else:
         await update.message.reply_text(f"Digest sent — {total} important email(s).")
 
