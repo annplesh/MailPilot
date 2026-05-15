@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(Get-ChildItem -Recurse \"c:\\\\Users\\\\Usuario\\\\Documents\\\\Projects\\\\jobpilot\")",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(python -c \"import os; [os.remove\\(f\\) for f in os.listdir\\('.'\\) if f.endswith\\('.db'\\)]\")",
+      "Bash(pip install *)",
+      "Bash(python -c \"import google.oauth2; print\\('google OK'\\)\")",
+      "Bash(python -c \"import bot; print\\('Import OK'\\)\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

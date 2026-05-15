@@ -1,197 +1,209 @@
-# =============================================================================
-# ai_filter.py — Claude AI email scoring for job opportunity detection
-# =============================================================================
-#
-# PURPOSE:
-#   Analyses an email's subject and body using the Anthropic SDK and returns
-#   a structured importance score (0–10) with a one-sentence reasoning.
-#   Results are used by database.py to decide whether an email is "important"
-#   and should appear in the user's daily digest.
-#
-# DESIGN NOTES:
-#   - A single module-level Anthropic client is reused across all calls
-#     to avoid repeated connection setup overhead.
-#   - The system prompt is long (~800 tokens) and identical for every call,
-#     making it ideal for Anthropic's prompt caching feature. The first call
-#     in a 5-minute window pays full input-token cost; subsequent calls within
-#     the same window reuse the cache and cost significantly less.
-#   - This module is intentionally synchronous. Async bot handlers in bot.py
-#     call score_email() via asyncio.to_thread() to avoid blocking the event loop.
-#
-# =============================================================================
+import os
+import json
+import re
+import time
+import logging
+
+import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+MODEL                 = "claude-sonnet-4-6"
+MAX_TOKENS            = 512
+BODY_TRUNCATION_LIMIT = 3000
+DEFAULT_KEYWORDS      = "any programming, development, freelance work"
+
+# Module-level singleton — reused across all score_email() calls.
+client = anthropic.Anthropic()
+
+# Must exceed 1024 tokens for Anthropic prompt caching to activate.
+SYSTEM_PROMPT = """
+You are an expert email classifier for freelance software developers actively seeking work opportunities. Your task is to evaluate each incoming email and assign an importance score from 0 to 10, indicating how likely the email represents a genuine professional opportunity worth the user's attention.
+
+Your scoring directly controls the user's experience: emails scoring at or above 8 trigger an immediate Telegram notification; emails scoring at or above 4 appear in the daily digest; emails below 4 are discarded silently. Both false positives (noise alerts) and false negatives (missed opportunities) hurt the user, so score carefully and honestly.
+
+═══════════════════════════════════════════════════════════════
+SCORING RUBRIC
+═══════════════════════════════════════════════════════════════
+
+10 — DIRECT RECRUITER OUTREACH (Immediate Alert)
+A human recruiter or hiring manager wrote this email specifically targeting this person.
+Required signals (all must be present):
+  • A specific, named role title (e.g. "Senior Python Developer", "Lead Backend Engineer")
+  • Company name mentioned explicitly
+  • A clear call to action: interview invitation, application link, or request to schedule a call
+  • Evidence of personalisation: references the candidate's background, skills, LinkedIn profile, or GitHub
+Example triggers: "We found your profile and would love to discuss a Backend Engineer role at Acme Corp.",
+"Are you open to a Staff Engineer opportunity? We've been following your open-source work."
+
+8 — JOB BOARD ALERT (High Priority)
+An automated email from a job board or aggregator where at least one listing directly matches the user's keywords.
+Required signals:
+  • At least one specific role title that matches one or more user keywords
+  • A direct link to apply for the matched position
+  • Compensation, contract type, or remote/on-site arrangement mentioned for matched role
+Example triggers: Job alert from LinkedIn/Indeed/Upwork with "Python Developer – Remote – $120k", keyword-matched notification from a niche tech job board.
+
+6 — NETWORKING MESSAGE (Medium Priority)
+A personal email from someone in the user's professional network that could plausibly lead to an introduction, referral, or contract.
+Indicators:
+  • Sender appears to be a real person (not a mailing list or platform robot)
+  • References shared professional context, mutual connections, or past collaboration
+  • Implicit or explicit mention of opportunities, projects, or work availability
+Example triggers: "Hey, a client of mine is looking for a Python consultant — are you free?",
+"Thought of you for a project I'm scoping out for Q3."
+
+4 — GENERIC JOB DIGEST (Low Priority)
+Automated newsletter or digest from a job platform with mixed, unfiltered listings. Relevant enough to appear in the digest, but not urgent.
+Indicators:
+  • Multiple listings in one email, most unrelated to user's keywords
+  • Templated, impersonal content generated automatically
+  • May occasionally contain a relevant listing but is not targeted to this user
+Example triggers: Weekly "Jobs for you" digest with 20 mixed positions, aggregator roundup email.
+
+2 — PLATFORM PROMOTIONAL EMAIL (Very Low Priority)
+Email from a professional platform that is primarily marketing content with no actual job listings.
+  • "Complete your profile to attract recruiters"
+  • "See who viewed your profile this week"
+  • "Upgrade to Premium for better visibility"
+  • Unfiltered "recommended jobs" with no keyword match
+
+0 — NOISE / IRRELEVANT (Discard)
+Any email with no connection to the user's professional goals:
+  • Spam or unsolicited commercial email
+  • Transactional email: receipts, invoices, shipping notifications, password resets
+  • Out-of-office auto-replies or bounce notifications
+  • Social media notifications (likes, follows, comments, friend requests)
+  • Newsletter subscriptions unrelated to work (travel, lifestyle, news, entertainment)
+  • Unsubscribe confirmations or mailing-list management emails
+  • Internal system alerts with no job-related content
+
+═══════════════════════════════════════════════════════════════
+POSITIVE SIGNALS (raise the score)
+═══════════════════════════════════════════════════════════════
+  • Specific role title + seniority level + technology stack appearing together
+  • Salary range, hourly rate, or contract budget stated explicitly
+  • Application deadline or urgency indicated ("closing Friday", "immediate start")
+  • Company name + location + work arrangement (remote / hybrid / on-site)
+  • Phrases indicating direct targeting: "your profile", "your experience",
+    "we'd like to speak", "are you available", "interested in an opportunity"
+  • Calendar scheduling links or proposed interview times included
+  • Reference to the candidate's GitHub, portfolio, or specific past project
+
+═══════════════════════════════════════════════════════════════
+NEGATIVE SIGNALS (lower the score)
+═══════════════════════════════════════════════════════════════
+  • Mass-mailing indicators: "unsubscribe", "view in browser", "email preferences",
+    "you're receiving this because…"
+  • Vague, generic language: "exciting opportunity", "top companies need your skills",
+    "join thousands of professionals"
+  • No role title, no company, and no technology stack mentioned
+  • Purely motivational or career-advice content with no concrete offer
+  • Content entirely outside the professional domain (shopping, travel, entertainment)
+  • Boilerplate with only the recipient's name personalised
+
+═══════════════════════════════════════════════════════════════
+LANGUAGE NOTE
+═══════════════════════════════════════════════════════════════
+Emails may be in any language — Spanish, English, Portuguese, or others.
+Always score based on the meaning and content of the email, not the language it is written in.
+Apply the same rubric regardless of language. Your reasoning field must always be in English.
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════
+Respond ONLY with a valid JSON object. No preamble, no explanation, no markdown code fences.
+Use exactly this schema:
+{
+  "score": <integer 0-10>,
+  "reasoning": "<one concise sentence in English explaining the score>",
+  "role_title": "<extracted job title as a string, or null if none found>",
+  "company": "<extracted company name as a string, or null if none found>"
+}
+""".strip()
 
 
-# --- Imports ------------------------------------------------------------------
-# anthropic   — Anthropic client; reads ANTHROPIC_API_KEY from environment
-# os          — access environment variables for configuration
-# json        — parse Claude's structured JSON response
-# re          — fallback regex extraction if JSON parsing fails
-# logging     — log API errors, rate-limit warnings, and score results
+def score_email(subject: str, body: str, keywords: list[str]) -> dict:
+    # Step 1: Truncate long bodies to keep token cost predictable.
+    if len(body) > BODY_TRUNCATION_LIMIT:
+        body = body[:BODY_TRUNCATION_LIMIT] + "\n[... email truncated for length ...]"
 
+    # Step 2: Build user message. Keywords go here (not in the cached system
+    # prompt) so they can vary per user without invalidating the cache.
+    kw_str = ", ".join(keywords) if keywords else DEFAULT_KEYWORDS
+    user_message = (
+        f"User's job-search keywords: {kw_str}\n"
+        f"---\n"
+        f"Subject: {subject}\n"
+        f"Body:\n{body}"
+    )
 
-# --- Client & Constants -------------------------------------------------------
-# client = anthropic.Anthropic()
-#   Module-level singleton. Automatically reads ANTHROPIC_API_KEY from env.
-#   Reused across all score_email() calls.
-#
-# MODEL = "claude-sonnet-4-6"
-#   The model used for all scoring requests.
-#
-# MAX_TOKENS = 512
-#   Response is a short JSON object; 512 tokens is more than sufficient.
-#
-# BODY_TRUNCATION_LIMIT = 3000
-#   Maximum characters of email body sent to Claude.
-#   Keeps prompt size predictable and avoids context-length errors on
-#   emails with large HTML content.
+    # Step 3: Call API with prompt caching on the system prompt.
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    # Cache the static system prompt for 5 minutes.
+                    # Saves ~800 input tokens on every call after the first.
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except anthropic.APIConnectionError as e:
+        logger.error("score_email connection error (subject=%r): %s", subject, e)
+        return {
+            "score": 0,
+            "reasoning": "API connection error — email not scored.",
+            "role_title": None,
+            "company": None,
+        }
+    except anthropic.RateLimitError:
+        logger.warning("score_email rate limit hit (subject=%r) — waiting 60 s", subject)
+        time.sleep(60)
+        raise
+    except anthropic.APIStatusError as e:
+        logger.error("score_email API error %s (subject=%r): %s", e.status_code, subject, e.message)
+        return {
+            "score": 0,
+            "reasoning": f"API error {e.status_code} — email not scored.",
+            "role_title": None,
+            "company": None,
+        }
 
+    # Step 4: Parse Claude's response.
+    raw = response.content[0].text
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        # Fallback: extract score via regex if the model adds unexpected preamble.
+        m = re.search(r'"score"\s*:\s*(\d+)', raw)
+        score = int(m.group(1)) if m else 0
+        logger.warning(
+            "score_email JSON parse failed (subject=%r), fallback score=%s", subject, score
+        )
+        return {
+            "score": max(0, min(10, score)),
+            "reasoning": raw,
+            "role_title": None,
+            "company": None,
+        }
 
-# =============================================================================
-# SYSTEM PROMPT
-# =============================================================================
-#
-# SYSTEM_PROMPT = """..."""
-#
-# PURPOSE:
-#   Defines Claude's role as a job-opportunity email classifier and provides
-#   a detailed scoring rubric. Must exceed 1024 tokens to qualify for
-#   Anthropic's prompt caching (cache_control: ephemeral).
-#
-# STRUCTURE OF THE PROMPT:
-#
-#   1. ROLE DECLARATION
-#      Instruct Claude that it is classifying emails for a freelance job seeker.
-#      Emphasise that the goal is to surface genuine opportunities and suppress
-#      noise (newsletters, marketing, system notifications).
-#
-#   2. SCORING RUBRIC (0–10 scale)
-#      10 — Direct recruiter outreach: specific role title, company name, and
-#            a clear invitation to apply or chat.
-#       8 — Job board alert that exactly matches one or more of the user's keywords.
-#       6 — Networking message from a contact that could plausibly lead to a referral
-#            or introduction.
-#       4 — Generic newsletter or digest from a job board with mixed listings;
-#            some listings may match keywords but the email is not targeted.
-#       2 — Promotional email from a job platform (e.g. "Upgrade your profile",
-#            "Jobs you might like" without a keyword match).
-#       0 — Spam, unsubscribe confirmations, out-of-office replies, receipts,
-#            or any email with no connection to employment.
-#
-#   3. POSITIVE SIGNALS TO DETECT
-#      - Specific role titles combined with seniority levels (e.g. "Senior Python Developer")
-#      - Salary or compensation ranges mentioned explicitly
-#      - Company name + phrases like "opportunity", "role", "position", "opening"
-#      - Phrases indicating direct outreach: "your profile caught our eye",
-#        "we'd like to speak with you", "are you open to opportunities"
-#      - Apply links, job posting URLs, or interview scheduling links
-#
-#   4. NEGATIVE SIGNALS TO DETECT
-#      - Marketing language: "limited time offer", "exclusive deal", "unsubscribe"
-#      - Generic job-board digests where none of the listed roles match keywords
-#      - System/transactional emails: password resets, login alerts, receipts
-#      - Bulk "you have N new matches" notifications without specific role details
-#
-#   5. OUTPUT FORMAT INSTRUCTION
-#      Instruct Claude to respond ONLY with a JSON object in this exact schema:
-#      {
-#        "score": <integer 0-10>,
-#        "reasoning": "<one sentence explaining the score>",
-#        "role_title": "<extracted job title or null if not found>",
-#        "company": "<extracted company name or null if not found>"
-#      }
-#      No text outside the JSON object. No markdown code fences.
+    # Step 5: Clamp score to [0, 10] — guards against model returning 11 or -1.
+    score = max(0, min(10, int(parsed.get("score", 0))))
 
+    logger.debug("scored email: score=%s subject=%r", score, subject)
 
-# =============================================================================
-# MAIN FUNCTION
-# =============================================================================
-
-# def score_email(subject: str, body: str, keywords: list[str]) -> dict:
-#
-#   PURPOSE:
-#     Send a single email to Claude for scoring. Returns a structured dict
-#     with the importance score and metadata extracted by the model.
-#
-#   PARAMETERS:
-#     subject   — The email Subject header string.
-#     body      — Plain-text (or lightly cleaned HTML) email body.
-#     keywords  — User's filter keywords list from the database,
-#                 e.g. ["Python", "backend", "remote"].
-#                 Injected into the user message so Claude can check for
-#                 keyword relevance even if the system prompt is cached
-#                 (cached system prompts do not vary per call).
-#
-#   RETURNS:
-#     dict: {
-#       'score':      int (0–10, clamped),
-#       'reasoning':  str,
-#       'role_title': str | None,
-#       'company':    str | None
-#     }
-#
-#   IMPLEMENTATION STEPS:
-#
-#   Step 1 — Truncate body
-#     If len(body) > BODY_TRUNCATION_LIMIT, slice to that limit and append:
-#     "\n[... email truncated for length ...]"
-#     This prevents oversized emails (e.g. HTML newsletters) from blowing
-#     the model's context window or inflating token costs.
-#
-#   Step 2 — Build user message
-#     Compose a plain-text string:
-#       "User's job-search keywords: Python, backend, remote
-#        ---
-#        Subject: <subject>
-#        Body:
-#        <body>"
-#     The keywords are in the user turn (not the cached system prompt) so
-#     they can vary per user without invalidating the cache.
-#
-#   Step 3 — Call the Anthropic API with prompt caching
-#     client.messages.create(
-#       model=MODEL,
-#       max_tokens=MAX_TOKENS,
-#       system=[
-#         {
-#           "type": "text",
-#           "text": SYSTEM_PROMPT,
-#           "cache_control": {"type": "ephemeral"}
-#           # WHY: The system prompt is static and ~800 tokens.
-#           # "ephemeral" caches it for 5 minutes after the first call.
-#           # On a batch of 50 emails, this saves ~49 × 800 = 39 200 cached
-#           # input tokens, reducing cost significantly.
-#         }
-#       ],
-#       messages=[
-#         {"role": "user", "content": user_message}
-#       ]
-#     )
-#
-#   Step 4 — Parse Claude's response
-#     Extract response.content[0].text (the raw string).
-#     Attempt json.loads() on the string.
-#     On JSONDecodeError (model occasionally adds a preamble):
-#       Use re.search(r'"score"\s*:\s*(\d+)', text) to extract the integer.
-#       Return a minimal dict: {score: extracted, reasoning: raw_text,
-#                               role_title: None, company: None}.
-#
-#   Step 5 — Validate and clamp score
-#     score = max(0, min(10, int(parsed['score'])))
-#     Guards against the model returning values like -1 or 11.
-#
-#   Step 6 — Return the final dict.
-#
-#   ERROR HANDLING:
-#     anthropic.APIConnectionError
-#       Log the error with the email subject. Return score=0 with
-#       reasoning="API connection error — email not scored."
-#
-#     anthropic.RateLimitError
-#       Log a WARNING. Re-raise the exception so the caller (gmail_reader.py)
-#       can implement exponential backoff before retrying.
-#
-#     anthropic.APIStatusError
-#       Log the HTTP status code and response body. Return score=0 with
-#       reasoning="API error <status_code> — email not scored."
-#
-#     All log messages include the email subject for traceability.
+    return {
+        "score":      score,
+        "reasoning":  parsed.get("reasoning", ""),
+        "role_title": parsed.get("role_title"),
+        "company":    parsed.get("company"),
+    }

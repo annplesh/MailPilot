@@ -39,9 +39,15 @@ Please show (no code yet):
 
 ### States
 
-- **START (0)** — User launches bot, sees welcome message
-- **SETUP (1)** — User connects Gmail, sets keywords and digest time
-- **ACTIVE (2)** — Bot monitors inbox 24/7, sends alerts and digest
+- **START (0)** — /start command, welcome message, offer /setup
+- **SETUP (1)** — 3-step wizard:
+  - Step 1: Gmail address (validate @gmail.com)
+  - Step 2: Keywords (comma-separated, minimum 1)
+  - Step 3: Digest time (HH:MM format, UTC)
+- **ACTIVE (2)** — monitoring mode:
+  - /status — show current settings and stats
+  - /digest — manual inbox check
+  - /setup — re-configure (allow_reentry=True)
 
 ### Data stored in SQLite
 
@@ -49,28 +55,36 @@ Please show (no code yet):
 
 - telegram_id
 - gmail_address
-- keywords
+- filter_keywords (JSON array)
 - digest_time
-- state
+- is_active
+- created_at, updated_at
 
 **Table: emails**
 
-- message_id (unique)
-- subject
-- sender
-- score
-- digest_sent
+- message_id (UNIQUE — deduplication)
+- subject, sender, received_at
+- ai_score, ai_reasoning
+- is_important, needs_alert, digest_sent
 - created_at
 
 ### Integrations
 
 1. Telegram Bot API — user interface
-2. Gmail API (OAuth2) — read emails
-3. Anthropic Claude API — score importance
+2. Gmail API (OAuth2) — read and modify emails
+3. Anthropic Claude API — importance scoring
 4. SQLite — persistent storage
+5. APScheduler — daily digest scheduling
+
+### Scoring thresholds
+
+- ALERT_THRESHOLD = 8.0 → instant Telegram alert
+- DIGEST_THRESHOLD = 4.0 → daily digest
+- Below 4.0 → trash automatically
 
 ### Unexpected input handling
 
-- User writes text when button expected → friendly error message
-- User writes in wrong state → redirect to correct state
-- Gmail connection fails → clear error with retry option
+- Invalid Gmail → "Please enter a valid @gmail.com address"
+- Invalid time format → "Please use HH:MM format (e.g. 09:00)"
+- Any text in wrong state → friendly error + redirect
+- Unknown command → fallback_handler responds politely
