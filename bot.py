@@ -46,13 +46,18 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ACTIVE
 
     await update.message.reply_text(
-        f"Hi {user.first_name}! I'm MailPilot \U0001f6e9️\n\n"
-        "I monitor your dedicated Gmail inbox and:\n"
-        "\U0001f534 Send instant alerts for urgent job opportunities\n"
-        "\U0001f4cb Send a daily digest of relevant opportunities\n"
-        "\U0001f5d1️ Auto-delete spam and irrelevant emails\n\n"
-        "Never miss the best gigs — they disappear in hours!\n\n"
-        "Run /setup to connect your Gmail and configure your filters."
+        f"Hi {user.first_name}! I'm MailPilot ✈️\n\n"
+        "I monitor your Gmail inbox and:\n"
+        "\U0001f534 Send instant alerts for urgent emails\n"
+        "\U0001f4cb Send a daily digest of important messages\n"
+        "\U0001f5d1️ Filter out noise automatically\n\n"
+        "You define what matters — set your own keywords.\n\n"
+        "Commands:\n"
+        "/setup — connect Gmail and configure filters\n"send important emails
+        "/status — view your settings\n"
+        "/digest — check inbox now\n"
+        "/ping — check if bot is alive\n\n"
+        "Run /setup to get started."
     )
     return START
 
@@ -148,11 +153,19 @@ async def _setup_step3_time(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await update.message.reply_text(
         f"Setup complete! I'll check your Gmail every day and send important "
-        f"opportunities at {text} UTC.\n\n"
+        f"important emails at {text} UTC.\n\n"
         "Use /status to review your settings or /digest to trigger a digest right now."
     )
     context.user_data.clear()
     return ACTIVE
+
+
+# =============================================================================
+# /ping
+# =============================================================================
+
+async def ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("\U0001f7e2 I'm alive and monitoring your inbox.")
 
 
 # =============================================================================
@@ -196,11 +209,7 @@ async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("⏳ Checking your inbox...")
 
     try:
-        await asyncio.to_thread(
-            gmail_reader.fetch_and_store_emails,
-            telegram_id,
-            user["filter_keywords"],
-        )
+        await _fetch_with_retry(telegram_id, user["filter_keywords"])
         alert_count  = await _send_alerts(telegram_id, context.bot)
         digest_count = await _send_digest(telegram_id, context.bot)
         total        = alert_count + digest_count
@@ -235,11 +244,7 @@ async def daily_digest_job(context: CallbackContext) -> None:
         return
 
     try:
-        await asyncio.to_thread(
-            gmail_reader.fetch_and_store_emails,
-            telegram_id,
-            user["filter_keywords"],
-        )
+        await _fetch_with_retry(telegram_id, user["filter_keywords"])
     except RefreshError:
         await context.bot.send_message(
             chat_id=telegram_id,
@@ -247,7 +252,11 @@ async def daily_digest_job(context: CallbackContext) -> None:
         )
         return
     except Exception as e:
-        logger.error("Daily fetch failed for user %s: %s", telegram_id, e)
+        logger.error("Daily fetch failed for user %s after retry: %s", telegram_id, e)
+        await context.bot.send_message(
+            chat_id=telegram_id,
+            text="❌ Please run /setup to reconnect.",
+        )
         return
 
     alert_count  = await _send_alerts(telegram_id, context.bot)
@@ -270,13 +279,34 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "/start  — restart the bot\n"
         "/setup  — connect Gmail and configure filters\n"
         "/status — view your settings and last 24 h stats\n"
-        "/digest — get today's important emails now"
+        "/digest — get today's important emails now\n"
+        "/ping   — check the bot is running"
     )
 
 
 # =============================================================================
 # Private helpers
 # =============================================================================
+
+async def _fetch_with_retry(telegram_id: int, keywords: list[str]) -> None:
+    """Call fetch_and_store_emails; on transient failure wait 30 s and retry once.
+
+    RefreshError is re-raised immediately — retrying a revoked token is pointless.
+    Any exception on the second attempt propagates to the caller.
+    """
+    try:
+        await asyncio.to_thread(
+            gmail_reader.fetch_and_store_emails, telegram_id, keywords
+        )
+    except RefreshError:
+        raise
+    except Exception as e:
+        logger.warning("Fetch failed for user %s, retrying in 30 s: %s", telegram_id, e)
+        await asyncio.sleep(30)
+        await asyncio.to_thread(
+            gmail_reader.fetch_and_store_emails, telegram_id, keywords
+        )
+
 
 def _schedule_daily_digest(application: Application, telegram_id: int, digest_time: time) -> None:
     if application.job_queue is None:
@@ -308,7 +338,7 @@ async def _send_alerts(telegram_id: int, bot) -> int:
 
     for e in alerts:
         text = (
-            "<b>Urgent opportunity</b>\n\n"
+            "<b>⚠️ Urgent email</b>\n\n"
             f"<b>From:</b> {html.escape(e['sender'] or '')}\n"
             f"<b>Subject:</b> {html.escape(e['subject'] or '')}\n"
             f"<b>Score:</b> {int(e['ai_score'])}/10\n"
@@ -390,7 +420,10 @@ def main() -> None:
                 CommandHandler("setup",  setup_start),   # allow reconfiguration
             ],
         },
-        fallbacks=[MessageHandler(filters.ALL, fallback_handler)],
+        fallbacks=[
+            CommandHandler("ping", ping_handler),
+            MessageHandler(filters.ALL, fallback_handler),
+        ],
         allow_reentry=True,
     )
     application.add_handler(conv_handler)
