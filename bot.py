@@ -41,7 +41,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if db_user and db_user["is_active"]:
         await update.message.reply_text(
             f"Welcome back, {user.first_name}! Your Gmail digest is active.\n\n"
-            "Use /status to see your settings or /digest to get today's important emails now."
+            "Use /status to see your settings or /digest to check your inbox now.\n\n"
+            "Commands:\n"
+            "/setup — connect Gmail and configure filters\n"
+            "/status — view your settings\n"
+            "/digest — check inbox now\n"
+            "/ping — check if bot is alive"
         )
         return ACTIVE
 
