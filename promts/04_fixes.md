@@ -25,12 +25,9 @@
 **Error:** Token file path included OAuth client ID instead of telegram_id
 **Fix applied:** Fixed GMAIL_TOKEN_DIR in .env and updated gmail_reader.py
 
-## Bug 5 — No auto-recovery after critical errors ⏳ PENDING
+## Bug 5 — No auto-recovery after critical errors ✅ FIXED
 
 **Found during:** testing
-
-**Fix needed:**
-
-- When bot encounters critical error — wait 30 seconds and retry
-- Add /ping command to check if bot is alive
-- If retry fails — send user clear message to run /setup
+**Fix applied:** Implemented via \_fetch_with_retry() with 30s delay and one
+retry, /ping command added, user error messages in digest_handler and
+daily_digest_job.
