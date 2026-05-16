@@ -53,7 +53,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         "\U0001f5d1️ Filter out noise automatically\n\n"
         "You define what matters — set your own keywords.\n\n"
         "Commands:\n"
-        "/setup — connect Gmail and configure filters\n"send important emails
+        "/setup — connect Gmail and configure filters\n"
         "/status — view your settings\n"
         "/digest — check inbox now\n"
         "/ping — check if bot is alive\n\n"
