@@ -211,6 +211,7 @@ async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Setup required. Run /setup first.")
         return
 
+    await update.effective_chat.send_action("typing")
     await update.message.reply_text("⏳ Checking your inbox...")
 
     try:

@@ -12,11 +12,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 MODEL                 = "claude-sonnet-4-6"
-MAX_TOKENS            = 512
+MAX_TOKENS            = 300
 BODY_TRUNCATION_LIMIT = 3000
 DEFAULT_KEYWORDS      = "any programming, development, freelance work"
 
-# Module-level singleton — reused across all score_email() calls.
+# Claude chosen for strong instruction-following in classification tasks
 client = anthropic.Anthropic()
 
 # Must exceed 1024 tokens for Anthropic prompt caching to activate.
@@ -146,6 +146,7 @@ def score_email(subject: str, body: str, keywords: list[str]) -> dict:
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
+            temperature=0.1,
             system=[
                 {
                     "type": "text",
