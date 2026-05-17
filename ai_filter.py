@@ -11,7 +11,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MODEL                 = "claude-sonnet-4-6"
+MODEL                 = "claude-haiku-4-5-20251001"
 MAX_TOKENS            = 300
 BODY_TRUNCATION_LIMIT = 3000
 DEFAULT_KEYWORDS      = "any programming, development, freelance work"

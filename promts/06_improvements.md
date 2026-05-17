@@ -21,3 +21,10 @@ Review ai_filter.py and check:
 - Typing indicator added before /digest response
 
 No other changes.Sonnet 4.6Claude es IA y puede cometer errores. Por favor, verifica las respuestas.
+
+## Model Optimization ✅ DONE
+
+**Change:** Switched from claude-sonnet-4-6 to claude-haiku-4-5-20251001
+**Reason:** Same classification quality at significantly lower cost.
+Haiku is sufficient for structured JSON output tasks.
+**Impact:** ~10x reduction in API costs for production scale.
