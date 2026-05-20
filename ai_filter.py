@@ -181,6 +181,10 @@ def score_email(subject: str, body: str, keywords: list[str]) -> dict:
 
     # Step 4: Parse Claude's response.
     raw = response.content[0].text
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r'^```(?:json)?\n?', '', raw)
+        raw = re.sub(r'\n?```$', '', raw)
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:

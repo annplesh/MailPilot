@@ -31,3 +31,31 @@
 **Fix applied:** Implemented via \_fetch_with_retry() with 30s delay and one
 retry, /ping command added, user error messages in digest_handler and
 daily_digest_job.
+
+## Bug 6 — JSON fences in Haiku response ✅ FIXED
+
+**Found during:** model switch to claude-haiku
+**Error:** Model wrapped JSON in `json` fences, raw JSON shown in Telegram
+
+**Prompt used:**
+In ai_filter.py, the model sometimes wraps JSON response in `json` fences.
+Add explicit stripping of markdown fences before json.loads():
+
+raw = response.content[0].text
+raw = raw.strip()
+if raw.startswith("`"):
+    raw = re.sub(r'^`(?:json)?\n?', '', raw)
+raw = re.sub(r'\n?```$', '', raw)
+
+**Fix applied:** Added fence stripping in ai_filter.py before json.loads()
+
+## Bug 7 — Bot ignores commands after restart without /start ⏳ PENDING
+
+**Found during:** testing after bot restart
+**Problem:** After bot restart, /digest and /ping don't respond
+until user sends /start first. FSM state is lost on restart.
+
+**Fix needed:**
+
+- On restart, restore FSM state from database for active users
+- Or: allow /digest and /ping outside FSM conversation handler
