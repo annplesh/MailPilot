@@ -19,6 +19,7 @@ from telegram.ext import (
     filters,
 )
 
+import ai_filter
 import database
 import gmail_reader
 
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 START  = 0
 SETUP  = 1
 ACTIVE = 2
+
+HELP_HISTORY_KEY = "help_history"
+MAX_HELP_HISTORY = 10  # max messages stored (5 exchanges)
 
 
 # =============================================================================
@@ -46,7 +50,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             "/setup — connect Gmail and configure filters\n"
             "/status — view your settings\n"
             "/digest — check inbox now\n"
-            "/ping — check if bot is alive"
+            "/ping — check if bot is alive\n"
+            "/help  — ask a question about MailPilot\n"
+            "/reset — clear /help conversation history"
         )
         return ACTIVE
 
@@ -275,6 +281,45 @@ async def daily_digest_job(context: CallbackContext) -> None:
 
 
 # =============================================================================
+# /help and /reset
+# =============================================================================
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    question = " ".join(context.args or []).strip()
+    if not question:
+        await update.message.reply_text(
+            "Ask me anything about MailPilot!\n"
+            "Example: /help how do keywords work?"
+        )
+        return
+
+    history = context.user_data.get(HELP_HISTORY_KEY, [])
+    history.append({"role": "user", "content": question})
+
+    await update.effective_chat.send_action("typing")
+
+    try:
+        answer = await asyncio.to_thread(ai_filter.answer_help_question, history)
+    except Exception as e:
+        logger.error("help AI error for user %s: %s", update.effective_user.id, e)
+        await update.message.reply_text(
+            "I couldn't answer that right now. "
+            "Try /setup to check your settings or contact support."
+        )
+        return
+
+    history.append({"role": "assistant", "content": answer})
+    context.user_data[HELP_HISTORY_KEY] = history[-MAX_HELP_HISTORY:]
+
+    await update.message.reply_text(answer)
+
+
+async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(HELP_HISTORY_KEY, None)
+    await update.message.reply_text("Conversation history cleared.")
+
+
+# =============================================================================
 # Fallback
 # =============================================================================
 
@@ -286,7 +331,9 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "/setup  — connect Gmail and configure filters\n"
         "/status — view your settings and last 24 h stats\n"
         "/digest — get today's important emails now\n"
-        "/ping   — check the bot is running"
+        "/ping   — check the bot is running\n"
+        "/help   — ask a question about MailPilot\n"
+        "/reset  — clear /help conversation history"
     )
 
 
@@ -427,7 +474,9 @@ def main() -> None:
             ],
         },
         fallbacks=[
-            CommandHandler("ping", ping_handler),
+            CommandHandler("ping",  ping_handler),
+            CommandHandler("help",  help_handler),
+            CommandHandler("reset", reset_handler),
             MessageHandler(filters.ALL, fallback_handler),
         ],
         allow_reentry=True,
