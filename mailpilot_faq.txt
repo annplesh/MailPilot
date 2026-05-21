@@ -1,0 +1,53 @@
+MailPilot — Frequently Asked Questions
+=======================================
+
+Q: What does MailPilot do?
+A: MailPilot connects to your Gmail inbox, scores every incoming email with Claude AI on a scale of 0 to 10, and routes the results to Telegram. Emails scoring 8 or above trigger an instant Telegram alert. Emails scoring 4 to 7 are batched into a daily digest sent at the time you choose. Emails scoring below 4 are filtered out silently.
+
+Q: How do I get started?
+A: Run /setup in the Telegram bot. It walks you through three steps: entering your Gmail address, setting your keywords, and choosing a daily digest time. On the first run a browser window opens so you can authorise Gmail access via Google OAuth2.
+
+Q: What happens during the /setup wizard?
+A: Step 1 — enter your Gmail address (must end in @gmail.com). Step 2 — enter keywords separated by commas (e.g. Python, backend, remote). Step 3 — enter the digest time in HH:MM UTC format (e.g. 09:00). After step 3 your settings are saved and the daily digest job is scheduled immediately.
+
+Q: How does the scoring work?
+A: Claude AI reads each email's subject and body and assigns a score from 0 to 10. Score 10 means direct personalised recruiter outreach. Score 8 is a job board alert matching your keywords. Score 6 is a networking message from someone in your professional circle. Score 4 is a generic automated job digest. Score 2 is a platform promotional email. Score 0 is noise — spam, receipts, social notifications, and unrelated newsletters.
+
+Q: What do keywords do?
+A: Keywords are passed to Claude alongside every email. They tell the AI what topics matter to you and directly influence the score. For example, if you set "Python, backend, remote" then an email mentioning a remote Python backend role scores higher than one that does not mention any of those terms.
+
+Q: What is the default keyword set?
+A: If you leave the keyword field empty during /setup, MailPilot uses the default: "any programming, development, freelance work". You can change your keywords at any time by running /setup again.
+
+Q: What is the difference between an alert and a digest?
+A: An alert is an instant Telegram message sent the moment MailPilot scores an email at 8 or above. It includes the sender, subject, score, and a one-sentence AI explanation. A digest is a batch of medium-priority emails (score 4–7) sent once per day at the time you configured. Each email in the digest also shows sender, subject, score, and reasoning.
+
+Q: Can I trigger a digest manually without waiting for the scheduled time?
+A: Yes. Run /digest at any time. MailPilot will immediately fetch your inbox, score all unread emails, send any instant alerts, and then send the digest for medium-priority emails. The bot replies "No new important emails." if nothing important was found.
+
+Q: What happens to spam and irrelevant emails?
+A: Any email scoring below 4 is silently discarded — you never see it in Telegram. This includes spam, receipts, shipping notifications, password reset emails, social media notifications, out-of-office replies, and newsletters unrelated to your keywords.
+
+Q: How does Gmail authorisation work?
+A: MailPilot uses Google OAuth2. No password is ever stored. On your first /setup a browser window opens and you grant Gmail read access. The resulting token is saved locally as token_<your_telegram_id>.json. The token is refreshed automatically before each fetch if it has expired.
+
+Q: What happens if my Gmail token expires or I revoke access?
+A: MailPilot will detect the failure, notify you in Telegram, and ask you to run /setup again to re-authorise. Running /setup re-opens the browser authorisation flow and saves a fresh token.
+
+Q: How do I change my keywords or digest time?
+A: Run /setup again at any time. It overwrites your previous settings. Your Gmail authorisation is preserved — you do not need to re-authorise unless the token has expired.
+
+Q: What does /status show?
+A: /status displays your connected Gmail address, your current keywords, your scheduled digest time (UTC), and a count of emails received and marked important in the last 24 hours.
+
+Q: How do I use the /help command?
+A: Type /help followed by your question. Example: /help how does scoring work? The assistant answers using its knowledge of MailPilot. It keeps the last 5 exchanges (10 messages) as context so you can ask follow-up questions.
+
+Q: What questions can /help answer?
+A: /help answers only questions about MailPilot — its commands, setup, scoring, keywords, Gmail connection, and digest/alert behaviour. For anything unrelated it will reply: "I can only help with MailPilot. For anything else, please use another tool."
+
+Q: What does /reset do?
+A: /reset clears the conversation history stored for /help. This does not affect your Gmail connection, keywords, digest time, or any other bot setting — it only resets the chat context used by the AI assistant.
+
+Q: What commands are available?
+A: /start — welcome message and status check. /setup — 3-step wizard to connect Gmail and configure filters. /status — view current settings and last-24h email counts. /digest — fetch and send digest immediately. /ping — confirm the bot is running. /help — ask a question about MailPilot. /reset — clear /help conversation history.
