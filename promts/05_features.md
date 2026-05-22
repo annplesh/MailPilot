@@ -25,3 +25,17 @@ Urgent emails are not delivered instantly.
 
 **Why:** User sees exactly what the bot did directly in Gmail inbox.
 Builds trust and makes the product transparent.
+
+## Feature 3 — Multi-language support ⏳ PLANNED
+
+**Identified by:** mentor feedback
+
+**Solution:**
+
+- After /start ask user: "Choose language / Elige idioma: 🇬🇧 English | 🇪🇸 Español"
+- Save language preference in database
+- All bot messages in chosen language
+- Priority: Spanish (LATAM + Spain) + English, maybe Russian
+
+**Notes:** Focus on Spanish-speaking markets first (LATAM + Spain).
+Russian TBD based on demand.
