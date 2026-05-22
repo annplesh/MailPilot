@@ -102,7 +102,7 @@ Replace embedding list with string format for pgvector:
 embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 Result: still returns empty list.
 
-## Prompt 8 — Debug RPC call with direct query
+## Prompt 8 — Debug RPC call with direct query ✅ SOLVED via Prompt 9
 
 In ai_filter.py, in search_knowledge_base(),
 replace embedding_str with direct SQL query instead of RPC.
@@ -117,7 +117,7 @@ Where embedding is the plain Python list from model.encode().tolist().
 Also add: print(f"DEBUG result.data: {result.data}")
 Show plan first.
 
-## Prompt 9 — Replace RPC with direct table query for RAG search
+## Prompt 9 — Replace RPC with direct table query for RAG search ✅ DONE
 
 In ai_filter.py, replace the RPC call in search_knowledge_base()
 with a direct table query approach:
