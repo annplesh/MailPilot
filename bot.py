@@ -299,7 +299,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_chat.send_action("typing")
 
     try:
-        answer = await asyncio.to_thread(ai_filter.answer_help_question, history)
+        chunks = await asyncio.to_thread(ai_filter.search_knowledge_base, question)
+        answer = await asyncio.to_thread(ai_filter.answer_help_question, history, chunks)
     except Exception as e:
         logger.error("help AI error for user %s: %s", update.effective_user.id, e)
         await update.message.reply_text(
