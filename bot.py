@@ -281,6 +281,32 @@ async def daily_digest_job(context: CallbackContext) -> None:
 
 
 # =============================================================================
+# 15-minute polling job
+# =============================================================================
+
+async def polling_job(context: CallbackContext) -> None:
+    for user in database.get_all_active_users():
+        telegram_id = user["telegram_id"]
+        try:
+            await _fetch_with_retry(telegram_id, user["filter_keywords"])
+        except RefreshError:
+            await context.bot.send_message(
+                chat_id=telegram_id,
+                text="Your Gmail authorization has expired. Run /setup to reconnect.",
+            )
+            continue
+        except Exception as e:
+            logger.warning("Polling fetch failed for user %s: %s", telegram_id, e)
+            continue
+
+        alert_count = await _send_alerts(telegram_id, context.bot)
+        if alert_count:
+            logger.info(
+                "Polling: sent %d alert(s) to user %s", alert_count, telegram_id
+            )
+
+
+# =============================================================================
 # /help and /reset
 # =============================================================================
 
@@ -496,6 +522,15 @@ def main() -> None:
                 "Failed to reschedule digest for user %s: %s",
                 user["telegram_id"], e,
             )
+
+    if application.job_queue is not None:
+        application.job_queue.run_repeating(
+            callback=polling_job,
+            interval=15 * 60,
+            first=10,
+            name="polling",
+        )
+        logger.info("Polling job scheduled every 15 minutes")
 
     logger.info("MailPilot is running. Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

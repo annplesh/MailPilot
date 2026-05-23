@@ -1,6 +1,6 @@
 # Prompt 05 — Feature Backlog
 
-## Feature 1 — Real-time alerts for urgent emails ⏳ PLANNED
+## Feature 1 — Real-time alerts for urgent emails ✅ DONE
 
 **Identified during:** live testing
 
