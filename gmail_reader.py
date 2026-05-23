@@ -29,6 +29,7 @@ SCOPES = [
 CREDENTIALS_FILE = os.getenv("GMAIL_CREDENTIALS_FILE", "credentials.json")
 GMAIL_TOKEN_DIR  = os.getenv("GMAIL_TOKEN_DIR", ".")
 MAX_MESSAGES     = 50
+MAILPILOT_LABELS = ["MailPilot/Urgent", "MailPilot/Digest", "MailPilot/Spam"]
 
 
 # =============================================================================
@@ -79,6 +80,8 @@ def fetch_and_store_emails(telegram_id: int, user_keywords: list[str]) -> int:
         logger.info("No new messages for user %s", telegram_id)
         return 0
 
+    label_ids = _resolve_mailpilot_labels(service)
+
     new_count = 0
     for message_id in message_ids:
         detail = _get_message_detail(service, message_id)
@@ -108,6 +111,14 @@ def fetch_and_store_emails(telegram_id: int, user_keywords: list[str]) -> int:
 
         # Mark as read regardless of score so the inbox stays clean.
         _mark_as_read(service, message_id)
+
+        score = score_result["score"]
+        if score >= 8:
+            _apply_label(service, message_id, label_ids.get("MailPilot/Urgent", ""))
+        elif score >= 4:
+            _apply_label(service, message_id, label_ids.get("MailPilot/Digest", ""))
+        else:
+            _apply_label(service, message_id, label_ids.get("MailPilot/Spam", ""))
 
         if inserted:
             new_count += 1
@@ -207,6 +218,45 @@ def _extract_body(payload: dict) -> str:
         decoded = re.sub(r"\s+", " ", decoded).strip()
 
     return decoded
+
+
+def _resolve_mailpilot_labels(service) -> dict:
+    """Ensure all MailPilot labels exist; return {name: id} mapping."""
+    try:
+        result   = service.users().labels().list(userId="me").execute()
+        existing = {lbl["name"]: lbl["id"] for lbl in result.get("labels", [])}
+        ids = {}
+        for name in MAILPILOT_LABELS:
+            if name in existing:
+                ids[name] = existing[name]
+            else:
+                created = service.users().labels().create(
+                    userId="me",
+                    body={
+                        "name": name,
+                        "labelListVisibility":   "labelShow",
+                        "messageListVisibility": "show",
+                    },
+                ).execute()
+                ids[name] = created["id"]
+                logger.info("Created Gmail label: %s", name)
+        return ids
+    except HttpError as e:
+        logger.warning("_resolve_mailpilot_labels failed: %s", e)
+        return {}
+
+
+def _apply_label(service, message_id: str, label_id: str) -> None:
+    if not label_id:
+        return
+    try:
+        service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"addLabelIds": [label_id]},
+        ).execute()
+    except HttpError as e:
+        logger.warning("Failed to apply label to message %s: %s", message_id, e)
 
 
 def _mark_as_read(service, message_id: str) -> None:

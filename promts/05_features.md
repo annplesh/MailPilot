@@ -13,18 +13,21 @@ Urgent emails are not delivered instantly.
 - If new email found with high AI score (8+) — send instant alert immediately
 - Daily digest at 13:00 UTC remains for lower-priority emails
 
-## Feature 2 — Auto-label emails in Gmail ⏳ PLANNED
+## Feature 2 — Auto-label emails in Gmail ✅ DONE
 
 **Identified during:** live testing
 
 **Solution:**
 
 - Urgent (score 8+) → label "MailPilot/Urgent"
-- Important (score 5-7) → label "MailPilot/Digest"
-- Irrelevant (score 1-4) → label "MailPilot/Filtered"
+- Important (score 4-7) → label "MailPilot/Digest"
+- Irrelevant (score 0-3) → label "MailPilot/Spam"
 
 **Why:** User sees exactly what the bot did directly in Gmail inbox.
 Builds trust and makes the product transparent.
+
+**Fix applied:** Score 0 was not getting any label — fixed by using else
+branch instead of elif score >= 1. Renamed "Filtered" to "Spam" for clarity.
 
 ## Feature 3 — Multi-language support ⏳ PLANNED
 
