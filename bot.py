@@ -52,7 +52,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             "/digest — check inbox now\n"
             "/ping — check if bot is alive\n"
             "/help  — ask a question about MailPilot\n"
-            "/reset — clear /help conversation history"
+            "/reset — clear /help conversation history\n\n"
+            "📬 Monitoring your inbox every 15 minutes for urgent emails."
         )
         return ACTIVE
 

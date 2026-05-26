@@ -28,3 +28,9 @@ No other changes.Sonnet 4.6Claude es IA y puede cometer errores. Por favor, veri
 **Reason:** Same classification quality at significantly lower cost.
 Haiku is sufficient for structured JSON output tasks.
 **Impact:** ~10x reduction in API costs for production scale.
+
+## Improvement — Add monitoring notice to welcome back message
+
+In start_handler, in the "welcome back" branch, add one line after the commands list:
+"\n📬 Monitoring your inbox every 15 minutes for urgent emails."
+No other changes.
