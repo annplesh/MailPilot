@@ -49,13 +49,21 @@ raw = re.sub(r'\n?```$', '', raw)
 
 **Fix applied:** Added fence stripping in ai_filter.py before json.loads()
 
-## Bug 7 — Bot ignores commands after restart without /start ⏳ PENDING
+## Bug 7 — Bot ignores commands after restart without /start ✅ FIXED
 
-**Found during:** testing after bot restart
-**Problem:** After bot restart, /digest and /ping don't respond
+**Found during:** live testing after bot restart
+**Problem:** After bot restart, /digest, /status, /ping don't respond
 until user sends /start first. FSM state is lost on restart.
 
-**Fix needed:**
+**Prompt used:**
+Fix Bug 7 — bot ignores commands after restart without /start.
 
-- On restart, restore FSM state from database for active users
-- Or: allow /digest and /ping outside FSM conversation handler
+After bot restart, active users in database cannot use /digest, /status,
+/ping until they manually send /start. FSM state is lost on restart.
+
+Fix: add /digest, /status, /help, /reset as standalone handlers
+OUTSIDE the ConversationHandler, so they work regardless of FSM state.
+Pattern already exists for /ping — use the same approach.
+
+No other changes.
+Show plan first.

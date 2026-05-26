@@ -510,6 +510,13 @@ def main() -> None:
     )
     application.add_handler(conv_handler)
 
+    # Standalone fallbacks so commands work after restart (FSM state lost on restart)
+    application.add_handler(CommandHandler("ping",   ping_handler))
+    application.add_handler(CommandHandler("help",   help_handler))
+    application.add_handler(CommandHandler("reset",  reset_handler))
+    application.add_handler(CommandHandler("status", status_handler))
+    application.add_handler(CommandHandler("digest", digest_handler))
+
     # Re-register digest jobs for all active users so no one misses their
     # digest after a bot crash or redeploy.
     for user in database.get_all_active_users():
