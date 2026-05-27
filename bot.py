@@ -7,11 +7,12 @@ from datetime import time, timezone
 
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CallbackContext,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -22,6 +23,7 @@ from telegram.ext import (
 import ai_filter
 import database
 import gmail_reader
+from strings import t
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +31,29 @@ logger = logging.getLogger(__name__)
 START  = 0
 SETUP  = 1
 ACTIVE = 2
+LANG   = 3
 
 HELP_HISTORY_KEY = "help_history"
 MAX_HELP_HISTORY = 10  # max messages stored (5 exchanges)
+
+
+# =============================================================================
+# Language helpers
+# =============================================================================
+
+def get_lang(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Return the user's language, caching in context.user_data to avoid repeat DB hits."""
+    if "language" not in context.user_data:
+        db_user = database.get_user(user_id)
+        context.user_data["language"] = (db_user or {}).get("language") or "en"
+    return context.user_data["language"]
+
+
+def _language_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+        InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es"),
+    ]])
 
 
 # =============================================================================
@@ -43,35 +65,57 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     db_user = database.get_user(user.id)
 
     if db_user and db_user["is_active"]:
-        await update.message.reply_text(
-            f"Welcome back, {user.first_name}! Your Gmail digest is active.\n\n"
-            "Use /status to see your settings or /digest to check your inbox now.\n\n"
-            "Commands:\n"
-            "/setup — connect Gmail and configure filters\n"
-            "/status — view your settings\n"
-            "/digest — check inbox now\n"
-            "/ping — check if bot is alive\n"
-            "/help  — ask a question about MailPilot\n"
-            "/reset — clear /help conversation history\n\n"
-            "📬 Monitoring your inbox every 15 minutes for urgent emails."
-        )
+        lang = get_lang(user.id, context)
+        await update.message.reply_text(t(lang, "welcome_back", name=user.first_name))
         return ACTIVE
 
+    # New (or inactive) user — ask language first
     await update.message.reply_text(
-        f"Hi {user.first_name}! I'm MailPilot ✈️\n\n"
-        "I monitor your Gmail inbox and:\n"
-        "\U0001f534 Send instant alerts for urgent emails\n"
-        "\U0001f4cb Send a daily digest of important messages\n"
-        "\U0001f5d1️ Filter out noise automatically\n\n"
-        "You define what matters — set your own keywords.\n\n"
-        "Commands:\n"
-        "/setup — connect Gmail and configure filters\n"
-        "/status — view your settings\n"
-        "/digest — check inbox now\n"
-        "/ping — check if bot is alive\n\n"
-        "Run /setup to get started."
+        t("en", "choose_language"),
+        reply_markup=_language_keyboard(),
     )
+    return LANG
+
+
+# =============================================================================
+# Language selection
+# =============================================================================
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle inline button press for language selection."""
+    query = update.callback_query
+    await query.answer()
+
+    lang    = query.data.split("_")[1]   # "lang_en" → "en"
+    user_id = update.effective_user.id
+    context.user_data["language"] = lang
+
+    db_user = database.get_user(user_id)
+    if db_user and db_user["is_active"]:
+        database.set_user_language(user_id, lang)
+        await query.edit_message_text(t(lang, "language_set"))
+        return ACTIVE
+
+    # New or inactive user — confirm language, let them proceed to /setup
+    await query.edit_message_text(t(lang, "language_set_new"))
     return START
+
+
+async def language_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /language command for active or START-state users."""
+    lang = get_lang(update.effective_user.id, context)
+    await update.message.reply_text(
+        t(lang, "choose_language"),
+        reply_markup=_language_keyboard(),
+    )
+    return LANG
+
+
+async def language_during_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /language command while setup wizard is in progress."""
+    lang = get_lang(update.effective_user.id, context)
+    await update.message.reply_text(t(lang, "setup_in_progress"))
+    return SETUP
 
 
 # =============================================================================
@@ -79,11 +123,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 # =============================================================================
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = get_lang(update.effective_user.id, context)
     context.user_data["setup_step"] = 1
-    await update.message.reply_text(
-        "Let's get you set up! (Step 1 of 3)\n\n"
-        "Please send the Gmail address you want to monitor."
-    )
+    await update.message.reply_text(t(lang, "setup_step1"))
     return SETUP
 
 
@@ -98,54 +140,42 @@ async def setup_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def _setup_step1_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = get_lang(update.effective_user.id, context)
     text = update.message.text.strip().lower()
     if not text.endswith("@gmail.com"):
-        await update.message.reply_text(
-            "That doesn't look like a Gmail address.\n"
-            "Please try again (e.g. yourname@gmail.com)."
-        )
+        await update.message.reply_text(t(lang, "setup_step1_invalid"))
         return SETUP
 
     context.user_data["gmail_address"]  = text
     context.user_data["setup_step"]     = 2
-    await update.message.reply_text(
-        "Step 2 of 3\n\n"
-        "Enter the keywords I should look for, separated by commas.\n"
-        "Example: Python, backend, remote, senior"
-    )
+    await update.message.reply_text(t(lang, "setup_step2"))
     return SETUP
 
 
 async def _setup_step2_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang     = get_lang(update.effective_user.id, context)
     keywords = [kw.strip() for kw in update.message.text.split(",") if kw.strip()]
     if not keywords:
-        await update.message.reply_text(
-            "Please enter at least one keyword (e.g. Python)."
-        )
+        await update.message.reply_text(t(lang, "setup_step2_empty"))
         return SETUP
 
     context.user_data["keywords"]   = keywords
     context.user_data["setup_step"] = 3
-    await update.message.reply_text(
-        "Step 3 of 3\n\n"
-        "What time should I send your daily digest? (UTC)\n"
-        "Format: HH:MM — e.g. 09:00"
-    )
+    await update.message.reply_text(t(lang, "setup_step3"))
     return SETUP
 
 
 async def _setup_step3_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = get_lang(update.effective_user.id, context)
     text = update.message.text.strip()
 
     if not re.match(r"^\d{2}:\d{2}$", text):
-        await update.message.reply_text("Please use HH:MM format (e.g. 09:00).")
+        await update.message.reply_text(t(lang, "setup_step3_invalid_format"))
         return SETUP
 
     hh, mm = int(text[:2]), int(text[3:])
     if not (0 <= hh <= 23 and 0 <= mm <= 59):
-        await update.message.reply_text(
-            "Invalid time — hours must be 00–23 and minutes 00–59 (e.g. 09:00)."
-        )
+        await update.message.reply_text(t(lang, "setup_step3_invalid_range"))
         return SETUP
 
     telegram_id   = update.effective_user.id
@@ -158,16 +188,13 @@ async def _setup_step3_time(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         filter_keywords=keywords,
         digest_time=text,
         is_active=1,
+        language=lang,
     )
 
     time_obj = time(hour=hh, minute=mm, tzinfo=timezone.utc)
     _schedule_daily_digest(context.application, telegram_id, time_obj)
 
-    await update.message.reply_text(
-        f"Setup complete! I'll check your Gmail every day and send important "
-        f"important emails at {text} UTC.\n\n"
-        "Use /status to review your settings or /digest to trigger a digest right now."
-    )
+    await update.message.reply_text(t(lang, "setup_complete", time=text))
     context.user_data.clear()
     return ACTIVE
 
@@ -177,7 +204,8 @@ async def _setup_step3_time(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # =============================================================================
 
 async def ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("\U0001f7e2 I'm alive and monitoring your inbox.")
+    lang = get_lang(update.effective_user.id, context)
+    await update.message.reply_text(t(lang, "ping"))
 
 
 # =============================================================================
@@ -186,24 +214,24 @@ async def ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_id = update.effective_user.id
-    user = database.get_user(telegram_id)
+    lang        = get_lang(telegram_id, context)
+    user        = database.get_user(telegram_id)
 
     if not user or not user["is_active"]:
-        await update.message.reply_text("Setup required. Run /setup first.")
+        await update.message.reply_text(t(lang, "setup_required"))
         return
 
-    stats       = database.get_recent_email_stats(telegram_id, hours=24)
-    kw_display  = ", ".join(user["filter_keywords"]) if user["filter_keywords"] else "none set"
+    stats      = database.get_recent_email_stats(telegram_id, hours=24)
+    kw_display = ", ".join(user["filter_keywords"]) if user["filter_keywords"] else "—"
 
-    await update.message.reply_text(
-        "MailPilot Status\n\n"
-        f"Gmail: {user['gmail_address']}\n"
-        f"Keywords: {kw_display}\n"
-        f"Daily digest: {user['digest_time']} UTC\n\n"
-        f"Last 24 h: {stats['total']} emails received, "
-        f"{stats['important']} marked important\n\n"
-        "Use /digest to get your current digest now."
-    )
+    await update.message.reply_text(t(
+        lang, "status_body",
+        gmail=user["gmail_address"],
+        keywords=kw_display,
+        time=user["digest_time"],
+        total=stats["total"],
+        important=stats["important"],
+    ))
 
 
 # =============================================================================
@@ -212,36 +240,33 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_id = update.effective_user.id
-    user = database.get_user(telegram_id)
+    lang        = get_lang(telegram_id, context)
+    user        = database.get_user(telegram_id)
 
     if not user or not user["is_active"]:
-        await update.message.reply_text("Setup required. Run /setup first.")
+        await update.message.reply_text(t(lang, "setup_required"))
         return
 
     await update.effective_chat.send_action("typing")
-    await update.message.reply_text("⏳ Checking your inbox...")
+    await update.message.reply_text(t(lang, "checking_inbox"))
 
     try:
         await _fetch_with_retry(telegram_id, user["filter_keywords"])
-        alert_count  = await _send_alerts(telegram_id, context.bot)
-        digest_count = await _send_digest(telegram_id, context.bot)
+        alert_count  = await _send_alerts(telegram_id, context.bot, lang)
+        digest_count = await _send_digest(telegram_id, context.bot, lang)
         total        = alert_count + digest_count
     except RefreshError:
-        await update.message.reply_text(
-            "❌ Could not connect to Gmail. Please run /setup again."
-        )
+        await update.message.reply_text(t(lang, "gmail_auth_error"))
         return
     except Exception as e:
         logger.error("digest failed for user %s: %s", telegram_id, e)
-        await update.message.reply_text(
-            "❌ Could not fetch emails. Try /setup to reconnect."
-        )
+        await update.message.reply_text(t(lang, "fetch_error"))
         return
 
     if total == 0:
-        await update.message.reply_text("\U0001f4ed No new important emails.")
+        await update.message.reply_text(t(lang, "no_emails"))
     else:
-        await update.message.reply_text(f"Digest sent — {total} important email(s).")
+        await update.message.reply_text(t(lang, "digest_sent", total=total))
 
 
 # =============================================================================
@@ -250,30 +275,32 @@ async def digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def daily_digest_job(context: CallbackContext) -> None:
     telegram_id = context.job.data
-    user = database.get_user(telegram_id)
+    user        = database.get_user(telegram_id)
 
     if not user or not user["is_active"]:
         logger.info("Skipping daily digest for inactive user %s", telegram_id)
         return
+
+    lang = user.get("language") or "en"
 
     try:
         await _fetch_with_retry(telegram_id, user["filter_keywords"])
     except RefreshError:
         await context.bot.send_message(
             chat_id=telegram_id,
-            text="Your Gmail authorization has expired. Run /setup to reconnect.",
+            text=t(lang, "gmail_expired"),
         )
         return
     except Exception as e:
         logger.error("Daily fetch failed for user %s after retry: %s", telegram_id, e)
         await context.bot.send_message(
             chat_id=telegram_id,
-            text="❌ Please run /setup to reconnect.",
+            text=t(lang, "reconnect_error"),
         )
         return
 
-    alert_count  = await _send_alerts(telegram_id, context.bot)
-    digest_count = await _send_digest(telegram_id, context.bot)
+    alert_count  = await _send_alerts(telegram_id, context.bot, lang)
+    digest_count = await _send_digest(telegram_id, context.bot, lang)
 
     logger.info(
         "Daily digest sent to %s — %d alert(s), %d digest email(s)",
@@ -288,19 +315,20 @@ async def daily_digest_job(context: CallbackContext) -> None:
 async def polling_job(context: CallbackContext) -> None:
     for user in database.get_all_active_users():
         telegram_id = user["telegram_id"]
+        lang        = user.get("language") or "en"
         try:
             await _fetch_with_retry(telegram_id, user["filter_keywords"])
         except RefreshError:
             await context.bot.send_message(
                 chat_id=telegram_id,
-                text="Your Gmail authorization has expired. Run /setup to reconnect.",
+                text=t(lang, "gmail_expired"),
             )
             continue
         except Exception as e:
             logger.warning("Polling fetch failed for user %s: %s", telegram_id, e)
             continue
 
-        alert_count = await _send_alerts(telegram_id, context.bot)
+        alert_count = await _send_alerts(telegram_id, context.bot, lang)
         if alert_count:
             logger.info(
                 "Polling: sent %d alert(s) to user %s", alert_count, telegram_id
@@ -312,12 +340,10 @@ async def polling_job(context: CallbackContext) -> None:
 # =============================================================================
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang     = get_lang(update.effective_user.id, context)
     question = " ".join(context.args or []).strip()
     if not question:
-        await update.message.reply_text(
-            "Ask me anything about MailPilot!\n"
-            "Example: /help how do keywords work?"
-        )
+        await update.message.reply_text(t(lang, "help_no_question"))
         return
 
     history = context.user_data.get(HELP_HISTORY_KEY, [])
@@ -330,10 +356,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         answer = await asyncio.to_thread(ai_filter.answer_help_question, history, chunks)
     except Exception as e:
         logger.error("help AI error for user %s: %s", update.effective_user.id, e)
-        await update.message.reply_text(
-            "I couldn't answer that right now. "
-            "Try /setup to check your settings or contact support."
-        )
+        await update.message.reply_text(t(lang, "help_ai_error"))
         return
 
     history.append({"role": "assistant", "content": answer})
@@ -343,8 +366,9 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = get_lang(update.effective_user.id, context)
     context.user_data.pop(HELP_HISTORY_KEY, None)
-    await update.message.reply_text("Conversation history cleared.")
+    await update.message.reply_text(t(lang, "history_cleared"))
 
 
 # =============================================================================
@@ -352,17 +376,8 @@ async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # =============================================================================
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "Sorry, I didn't understand that.\n\n"
-        "Available commands:\n"
-        "/start  — restart the bot\n"
-        "/setup  — connect Gmail and configure filters\n"
-        "/status — view your settings and last 24 h stats\n"
-        "/digest — get today's important emails now\n"
-        "/ping   — check the bot is running\n"
-        "/help   — ask a question about MailPilot\n"
-        "/reset  — clear /help conversation history"
-    )
+    lang = get_lang(update.effective_user.id, context)
+    await update.message.reply_text(t(lang, "unknown_command"))
 
 
 # =============================================================================
@@ -408,7 +423,7 @@ def _schedule_daily_digest(application: Application, telegram_id: int, digest_ti
     logger.info("Scheduled daily digest for user %s at %s UTC", telegram_id, digest_time)
 
 
-async def _send_alerts(telegram_id: int, bot) -> int:
+async def _send_alerts(telegram_id: int, bot, lang: str = "en") -> int:
     """Send instant alert messages for high-scoring emails (needs_alert=1).
 
     Marks each alerted email as digest_sent so it does not appear again
@@ -419,10 +434,10 @@ async def _send_alerts(telegram_id: int, bot) -> int:
 
     for e in alerts:
         text = (
-            "<b>⚠️ Urgent email</b>\n\n"
-            f"<b>From:</b> {html.escape(e['sender'] or '')}\n"
-            f"<b>Subject:</b> {html.escape(e['subject'] or '')}\n"
-            f"<b>Score:</b> {int(e['ai_score'])}/10\n"
+            f"<b>{t(lang, 'alert_header')}</b>\n\n"
+            f"<b>{t(lang, 'from_label')}:</b> {html.escape(e['sender'] or '')}\n"
+            f"<b>{t(lang, 'subject_label')}:</b> {html.escape(e['subject'] or '')}\n"
+            f"<b>{t(lang, 'score_label')}:</b> {int(e['ai_score'])}/10\n"
             f"<i>{html.escape(e['ai_reasoning'] or '')}</i>"
         )
         await bot.send_message(chat_id=telegram_id, text=text, parse_mode=ParseMode.HTML)
@@ -433,7 +448,7 @@ async def _send_alerts(telegram_id: int, bot) -> int:
     return len(alerts)
 
 
-async def _send_digest(telegram_id: int, bot) -> int:
+async def _send_digest(telegram_id: int, bot, lang: str = "en") -> int:
     """Send digest-priority emails (is_important=1, digest_sent=0).
 
     Each email is sent as a separate Telegram message to stay within
@@ -445,15 +460,15 @@ async def _send_digest(telegram_id: int, bot) -> int:
         return 0
 
     # Header on the first email message to give context.
-    header = f"<b>MailPilot Digest</b> — {len(unsent)} important email(s)\n\n"
+    header = f"<b>{t(lang, 'digest_title', count=len(unsent))}</b>\n\n"
 
     for idx, e in enumerate(unsent):
         prefix = header if idx == 0 else ""
         text = (
             f"{prefix}"
             f"<b>{html.escape(e['subject'] or '(no subject)')}</b>\n"
-            f"From: {html.escape(e['sender'] or '')}\n"
-            f"Score: {int(e['ai_score'])}/10\n"
+            f"{t(lang, 'from_label')}: {html.escape(e['sender'] or '')}\n"
+            f"{t(lang, 'score_label')}: {int(e['ai_score'])}/10\n"
             f"<i>{html.escape(e['ai_reasoning'] or '')}</i>"
         )
         await bot.send_message(chat_id=telegram_id, text=text, parse_mode=ParseMode.HTML)
@@ -489,22 +504,29 @@ def main() -> None:
             CommandHandler("setup", setup_start),
         ],
         states={
+            LANG: [
+                CallbackQueryHandler(language_callback, pattern="^lang_"),
+            ],
             START: [
                 CommandHandler("setup", setup_start),
             ],
             SETUP: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_dispatch),
+                CommandHandler("language", language_during_setup),
             ],
             ACTIVE: [
-                CommandHandler("status", status_handler),
-                CommandHandler("digest", digest_handler),
-                CommandHandler("setup",  setup_start),   # allow reconfiguration
+                CommandHandler("status",   status_handler),
+                CommandHandler("digest",   digest_handler),
+                CommandHandler("setup",    setup_start),
+                CommandHandler("language", language_handler),
             ],
         },
         fallbacks=[
-            CommandHandler("ping",  ping_handler),
-            CommandHandler("help",  help_handler),
-            CommandHandler("reset", reset_handler),
+            CommandHandler("ping",     ping_handler),
+            CommandHandler("help",     help_handler),
+            CommandHandler("reset",    reset_handler),
+            CommandHandler("language", language_handler),
+            CallbackQueryHandler(language_callback, pattern="^lang_"),
             MessageHandler(filters.ALL, fallback_handler),
         ],
         allow_reentry=True,
@@ -512,11 +534,13 @@ def main() -> None:
     application.add_handler(conv_handler)
 
     # Standalone fallbacks so commands work after restart (FSM state lost on restart)
-    application.add_handler(CommandHandler("ping",   ping_handler))
-    application.add_handler(CommandHandler("help",   help_handler))
-    application.add_handler(CommandHandler("reset",  reset_handler))
-    application.add_handler(CommandHandler("status", status_handler))
-    application.add_handler(CommandHandler("digest", digest_handler))
+    application.add_handler(CommandHandler("ping",     ping_handler))
+    application.add_handler(CommandHandler("help",     help_handler))
+    application.add_handler(CommandHandler("reset",    reset_handler))
+    application.add_handler(CommandHandler("status",   status_handler))
+    application.add_handler(CommandHandler("digest",   digest_handler))
+    application.add_handler(CommandHandler("language", language_handler))
+    application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
 
     # Re-register digest jobs for all active users so no one misses their
     # digest after a bot crash or redeploy.
