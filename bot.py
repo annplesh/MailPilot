@@ -117,8 +117,14 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(t(lang, "language_set"))
         return ACTIVE
 
-    # New or inactive user — confirm language, let them proceed to /setup
+    # New or inactive user — confirm language
     await query.edit_message_text(t(lang, "language_set_new"))
+
+    if context.user_data.pop("pending_setup", False):
+        context.user_data["setup_step"] = 1
+        await query.message.reply_text(t(lang, "setup_step1"))
+        return SETUP
+
     return START
 
 
@@ -163,7 +169,17 @@ async def tz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 # =============================================================================
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = get_lang(update.effective_user.id, context)
+    user_id = update.effective_user.id
+
+    if database.get_user(user_id) is None and "language" not in context.user_data:
+        context.user_data["pending_setup"] = True
+        await update.message.reply_text(
+            t("en", "choose_language"),
+            reply_markup=_language_keyboard(),
+        )
+        return LANG
+
+    lang = get_lang(user_id, context)
     context.user_data["setup_step"] = 1
     await update.message.reply_text(t(lang, "setup_step1"))
     return SETUP

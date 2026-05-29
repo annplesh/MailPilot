@@ -44,3 +44,17 @@ Add after /reset:
 "/language — cambiar idioma / change language"
 
 No other changes.
+
+## Prompt 4 — Show language selector in /setup if no language set
+
+In setup_start handler, if user has no language set in database,
+show language selection keyboard before starting setup wizard.
+If language already set — proceed to setup as normal.
+
+Additional requirement:
+After language selection in language_callback, if user came from /setup
+(no DB record), automatically start setup wizard immediately
+without requiring user to send /setup again.
+Use context.user_data["pending_setup"] = True flag to track this.
+
+No other changes. Show plan first.
