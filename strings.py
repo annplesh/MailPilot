@@ -21,6 +21,20 @@ STRINGS: dict[str, dict[str, str]] = {
             "📬 Monitoring your inbox every 15 minutes for urgent emails."
         ),
 
+        # Setup wizard — step 3: timezone + time
+        "setup_step3_tz":     "Step 3 of 3\n\nChoose your timezone:",
+        "setup_step3b_local": (
+            "Enter the time for your daily digest.\n"
+            "Format: H:MM AM or H:MM PM\n"
+            "Example: 9:00 AM"
+        ),
+        "setup_step3b_utc": (
+            "Enter the time for your daily digest in UTC.\n"
+            "Format: HH:MM\n"
+            "Example: 14:00"
+        ),
+        "setup_step3b_invalid": "Invalid format. Please use H:MM AM or H:MM PM (e.g. 9:00 AM).",
+
         # Setup wizard
         "setup_step1": (
             "Let's get you set up! (Step 1 of 3)\n\n"
@@ -44,8 +58,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "setup_step3_invalid_format": "Please use HH:MM format (e.g. 09:00).",
         "setup_step3_invalid_range":  "Invalid time — hours must be 00–23 and minutes 00–59 (e.g. 09:00).",
         "setup_complete": (
-            "Setup complete! I'll check your Gmail every day and send important "
-            "emails at {time} UTC.\n\n"
+            "Setup complete! I'll send your daily digest at {time}.\n\n"
             "Use /status to review your settings or /digest to trigger a digest right now."
         ),
 
@@ -58,7 +71,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "MailPilot Status\n\n"
             "Gmail: {gmail}\n"
             "Keywords: {keywords}\n"
-            "Daily digest: {time} UTC\n\n"
+            "Daily digest: {time}\n\n"
             "Last 24 h: {total} emails received, {important} marked important\n\n"
             "Use /digest to get your current digest now."
         ),
@@ -131,6 +144,20 @@ STRINGS: dict[str, dict[str, str]] = {
             "📬 Monitoreando tu bandeja cada 15 minutos en busca de correos urgentes."
         ),
 
+        # Setup wizard — step 3: timezone + time
+        "setup_step3_tz":     "Paso 3 de 3\n\nElige tu zona horaria:",
+        "setup_step3b_local": (
+            "Ingresa la hora para tu resumen diario.\n"
+            "Formato: H:MM AM o H:MM PM\n"
+            "Ejemplo: 9:00 AM"
+        ),
+        "setup_step3b_utc": (
+            "Ingresa la hora para tu resumen diario en UTC.\n"
+            "Formato: HH:MM\n"
+            "Ejemplo: 14:00"
+        ),
+        "setup_step3b_invalid": "Formato inválido. Por favor usa H:MM AM o H:MM PM (ej. 9:00 AM).",
+
         # Setup wizard
         "setup_step1": (
             "¡Vamos a configurar tu cuenta! (Paso 1 de 3)\n\n"
@@ -154,8 +181,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "setup_step3_invalid_format": "Por favor usa el formato HH:MM (ej. 09:00).",
         "setup_step3_invalid_range":  "Hora inválida — las horas deben ser 00–23 y los minutos 00–59 (ej. 09:00).",
         "setup_complete": (
-            "¡Configuración completa! Revisaré tu Gmail todos los días y enviaré "
-            "correos importantes a las {time} UTC.\n\n"
+            "¡Configuración completa! Enviaré tu resumen diario a las {time}.\n\n"
             "Usa /status para revisar tu configuración o /digest para obtener un resumen ahora."
         ),
 
@@ -168,7 +194,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "Estado de MailPilot\n\n"
             "Gmail: {gmail}\n"
             "Palabras clave: {keywords}\n"
-            "Resumen diario: {time} UTC\n\n"
+            "Resumen diario: {time}\n\n"
             "Últimas 24 h: {total} correos recibidos, {important} marcados como importantes\n\n"
             "Usa /digest para obtener tu resumen ahora."
         ),

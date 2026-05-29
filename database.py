@@ -43,6 +43,8 @@ def init_db():
                     digest_time     TEXT    DEFAULT '09:00',
                     is_active       INTEGER DEFAULT 0,
                     language        TEXT    DEFAULT 'en',
+                    timezone        TEXT    DEFAULT 'UTC',
+                    tz_offset_hours REAL    DEFAULT 0,
                     created_at      TEXT,
                     updated_at      TEXT
                 );
@@ -69,12 +71,14 @@ def init_db():
                     ON emails(user_id, received_at);
             """)
             conn.commit()
-            # Migration: add language column to existing databases
+            # Migrations: add columns to existing databases
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'")
+                conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'UTC'")
+                conn.execute("ALTER TABLE users ADD COLUMN tz_offset_hours REAL DEFAULT 0")
                 conn.commit()
             except sqlite3.OperationalError:
-                pass  # column already exists
+                pass  # columns already exist
         logger.info("Database ready: %s", DATABASE_PATH)
     except sqlite3.Error as e:
         logger.error("init_db failed: %s", e)
@@ -82,24 +86,27 @@ def init_db():
 
 
 def upsert_user(telegram_id: int, gmail_address: str, filter_keywords: list,
-                digest_time: str, is_active: int, language: str = "en"):
+                digest_time: str, is_active: int, language: str = "en",
+                timezone: str = "UTC", tz_offset_hours: float = 0):
     now = _now_utc()
     try:
         with get_connection() as conn:
             conn.execute("""
                 INSERT INTO users
                     (telegram_id, gmail_address, filter_keywords, digest_time,
-                     is_active, language, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     is_active, language, timezone, tz_offset_hours, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(telegram_id) DO UPDATE SET
                     gmail_address   = excluded.gmail_address,
                     filter_keywords = excluded.filter_keywords,
                     digest_time     = excluded.digest_time,
                     is_active       = excluded.is_active,
                     language        = excluded.language,
+                    timezone        = excluded.timezone,
+                    tz_offset_hours = excluded.tz_offset_hours,
                     updated_at      = excluded.updated_at
             """, (telegram_id, gmail_address, json.dumps(filter_keywords),
-                  digest_time, is_active, language, now, now))
+                  digest_time, is_active, language, timezone, tz_offset_hours, now, now))
             conn.commit()
     except sqlite3.Error as e:
         logger.error("upsert_user(%s) failed: %s", telegram_id, e)

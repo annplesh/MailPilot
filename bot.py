@@ -56,6 +56,27 @@ def _language_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
+# (button_label, tz_display_label, utc_offset_hours)
+TIMEZONE_OPTIONS = [
+    ("🇲🇽 México (UTC-6)",    "México (UTC-6)",    -6),
+    ("🇨🇴 Colombia (UTC-5)",  "Colombia (UTC-5)",  -5),
+    ("🇻🇪 Venezuela (UTC-4)", "Venezuela (UTC-4)", -4),
+    ("🇦🇷 Argentina (UTC-3)", "Argentina (UTC-3)", -3),
+    ("🇪🇸 España (UTC+1)",    "España (UTC+1)",    +1),
+    ("🌍 Other",               "UTC",                0),
+]
+
+
+def _timezone_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(label, callback_data=f"tz_{i}")
+        for i, (label, _, _) in enumerate(TIMEZONE_OPTIONS)
+    ]
+    # Two-column layout
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(rows)
+
+
 # =============================================================================
 # /start
 # =============================================================================
@@ -118,6 +139,25 @@ async def language_during_setup(update: Update, context: ContextTypes.DEFAULT_TY
     return SETUP
 
 
+async def tz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle timezone inline button press during setup step 3."""
+    query = update.callback_query
+    await query.answer()
+
+    idx  = int(query.data.split("_")[1])   # "tz_0" → 0
+    _, tz_label, offset = TIMEZONE_OPTIONS[idx]
+    lang = get_lang(update.effective_user.id, context)
+
+    context.user_data["timezone"]        = tz_label
+    context.user_data["tz_offset_hours"] = offset
+    context.user_data["tz_is_manual"]    = (tz_label == "UTC")
+    context.user_data["setup_step"]      = 4
+
+    prompt_key = "setup_step3b_utc" if tz_label == "UTC" else "setup_step3b_local"
+    await query.edit_message_text(t(lang, prompt_key))
+    return SETUP
+
+
 # =============================================================================
 # /setup — entry point + 3-step wizard
 # =============================================================================
@@ -136,7 +176,15 @@ async def setup_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return await _setup_step1_gmail(update, context)
     if step == 2:
         return await _setup_step2_keywords(update, context)
-    return await _setup_step3_time(update, context)
+    if step == 3:
+        # User typed text while the TZ keyboard is showing — re-show it
+        lang = get_lang(update.effective_user.id, context)
+        await update.message.reply_text(
+            t(lang, "setup_step3_tz"),
+            reply_markup=_timezone_keyboard(),
+        )
+        return SETUP
+    return await _setup_step4_localtime(update, context)
 
 
 async def _setup_step1_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -161,40 +209,71 @@ async def _setup_step2_keywords(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data["keywords"]   = keywords
     context.user_data["setup_step"] = 3
-    await update.message.reply_text(t(lang, "setup_step3"))
+    await update.message.reply_text(
+        t(lang, "setup_step3_tz"),
+        reply_markup=_timezone_keyboard(),
+    )
     return SETUP
 
 
-async def _setup_step3_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = get_lang(update.effective_user.id, context)
-    text = update.message.text.strip()
+async def _setup_step4_localtime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang         = get_lang(update.effective_user.id, context)
+    text         = update.message.text.strip()
+    print(f"DEBUG time input: {repr(text)}")
+    tz_is_manual = context.user_data.get("tz_is_manual", False)
 
-    if not re.match(r"^\d{2}:\d{2}$", text):
-        await update.message.reply_text(t(lang, "setup_step3_invalid_format"))
-        return SETUP
-
-    hh, mm = int(text[:2]), int(text[3:])
-    if not (0 <= hh <= 23 and 0 <= mm <= 59):
-        await update.message.reply_text(t(lang, "setup_step3_invalid_range"))
-        return SETUP
+    if tz_is_manual:
+        # Accept HH:MM UTC
+        if not re.match(r"^\d{2}:\d{2}$", text):
+            await update.message.reply_text(t(lang, "setup_step3_invalid_format"))
+            return SETUP
+        hh, mm = int(text[:2]), int(text[3:])
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            await update.message.reply_text(t(lang, "setup_step3_invalid_range"))
+            return SETUP
+        utc_time     = text
+        time_display = text + " UTC"
+    else:
+        # Accept H:MM AM/PM local time
+        m = re.match(r"^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)$", text)
+        if not m or not (1 <= int(m.group(1)) <= 12 and 0 <= int(m.group(2)) <= 59):
+            await update.message.reply_text(t(lang, "setup_step3b_invalid"))
+            return SETUP
+        local_h, mm, period = int(m.group(1)), int(m.group(2)), m.group(3).upper()
+        # Convert 12-hour to 24-hour
+        if period == "AM":
+            h24 = 0 if local_h == 12 else local_h
+        else:
+            h24 = 12 if local_h == 12 else local_h + 12
+        # Shift to UTC
+        offset   = int(context.user_data.get("tz_offset_hours", 0))
+        utc_h    = (h24 - offset) % 24
+        utc_time = f"{utc_h:02d}:{mm:02d}"
+        tz_label = context.user_data.get("timezone", "UTC")
+        time_display = f"{local_h}:{mm:02d} {period} ({tz_label})"
 
     telegram_id   = update.effective_user.id
     gmail_address = context.user_data["gmail_address"]
     keywords      = context.user_data["keywords"]
+    timezone_str  = context.user_data.get("timezone", "UTC")
+    tz_offset     = context.user_data.get("tz_offset_hours", 0)
 
+    hh, mm = map(int, utc_time.split(":"))
     database.upsert_user(
         telegram_id=telegram_id,
         gmail_address=gmail_address,
         filter_keywords=keywords,
-        digest_time=text,
+        digest_time=utc_time,
         is_active=1,
         language=lang,
+        timezone=timezone_str,
+        tz_offset_hours=tz_offset,
     )
 
     time_obj = time(hour=hh, minute=mm, tzinfo=timezone.utc)
     _schedule_daily_digest(context.application, telegram_id, time_obj)
 
-    await update.message.reply_text(t(lang, "setup_complete", time=text))
+    await update.message.reply_text(t(lang, "setup_complete", time=time_display))
     context.user_data.clear()
     return ACTIVE
 
@@ -224,11 +303,18 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     stats      = database.get_recent_email_stats(telegram_id, hours=24)
     kw_display = ", ".join(user["filter_keywords"]) if user["filter_keywords"] else "—"
 
+    tz_offset = user.get("tz_offset_hours") or 0
+    tz_label  = user.get("timezone") or "UTC"
+    if tz_label == "UTC":
+        time_display = user["digest_time"] + " UTC"
+    else:
+        time_display = f"{_format_local_time(user['digest_time'], tz_offset)} ({tz_label})"
+
     await update.message.reply_text(t(
         lang, "status_body",
         gmail=user["gmail_address"],
         keywords=kw_display,
-        time=user["digest_time"],
+        time=time_display,
         total=stats["total"],
         important=stats["important"],
     ))
@@ -384,6 +470,15 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # Private helpers
 # =============================================================================
 
+def _format_local_time(utc_str: str, tz_offset_hours: float) -> str:
+    """Convert a UTC HH:MM string to a local 12-hour AM/PM string."""
+    h, m     = map(int, utc_str.split(":"))
+    local_h  = (h + int(tz_offset_hours)) % 24
+    period   = "AM" if local_h < 12 else "PM"
+    disp_h   = local_h % 12 or 12
+    return f"{disp_h}:{m:02d} {period}"
+
+
 async def _fetch_with_retry(telegram_id: int, keywords: list[str]) -> None:
     """Call fetch_and_store_emails; on transient failure wait 30 s and retry once.
 
@@ -513,6 +608,7 @@ def main() -> None:
             SETUP: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_dispatch),
                 CommandHandler("language", language_during_setup),
+                CallbackQueryHandler(tz_callback, pattern="^tz_"),
             ],
             ACTIVE: [
                 CommandHandler("status",   status_handler),

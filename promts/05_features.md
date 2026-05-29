@@ -29,7 +29,7 @@ Builds trust and makes the product transparent.
 **Fix applied:** Score 0 was not getting any label — fixed by using else
 branch instead of elif score >= 1. Renamed "Filtered" to "Spam" for clarity.
 
-## Feature 3 — Multi-language support ⏳ PLANNED
+## Feature 3 — Multi-language support ✅ DONE
 
 **Identified by:** mentor feedback
 
@@ -42,3 +42,21 @@ branch instead of elif score >= 1. Renamed "Filtered" to "Spam" for clarity.
 
 **Notes:** Focus on Spanish-speaking markets first (LATAM + Spain).
 Russian TBD based on demand.
+
+## Feature 4 — Timezone support for daily digest ⏳ PLANNED
+
+**Identified during:** multi-language testing
+
+**Problem:** User must enter digest time in UTC which is confusing.
+Most LATAM users don't know their UTC offset.
+
+**Solution:**
+
+- Add timezone selection step in /setup
+- Show list of popular LATAM + Spain timezones with city names
+- Convert selected timezone to UTC internally
+- Display digest time in user's local time in /status
+- Use 12-hour AM/PM format for all languages
+
+**Why AM/PM:** More natural for LATAM and Spanish-speaking users.
+Easy to understand universally.

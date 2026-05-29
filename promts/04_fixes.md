@@ -67,3 +67,15 @@ Pattern already exists for /ping — use the same approach.
 
 No other changes.
 Show plan first.
+
+## Bug 8 — AM/PM time format not accepted in /setup step 4 ⏳ PENDING
+
+**Found during:** timezone feature testing
+
+**Problem:** Bot rejects "9:00 AM" format despite regex seemingly correct.
+Debug needed to see what text is actually received.
+
+**Prompt used:**
+In \_setup_step4_localtime in bot.py, add debug print at start of function:
+print(f"DEBUG time input: {repr(text)}")
+No other changes.
