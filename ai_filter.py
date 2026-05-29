@@ -260,18 +260,38 @@ Keep answers concise — maximum 3 short paragraphs. Telegram renders plain text
 """.strip()
 
 
-def answer_help_question(history: list[dict], context: list[str] | None = None) -> str:
-    messages = history
-    if context:
-        context_block = "\n\n".join(context)
-        last = history[-1]
-        messages = history[:-1] + [{
-            "role": "user",
-            "content": (
-                f"Relevant FAQ excerpts:\n{context_block}\n\n"
-                f"---\n{last['content']}"
-            ),
-        }]
+_faq_text: str | None = None
+FAQ_PATH = "mailpilot_faq.txt"
+
+
+def _load_faq() -> str:
+    """Read mailpilot_faq.txt once and cache in memory."""
+    global _faq_text
+    if _faq_text is None:
+        try:
+            with open(FAQ_PATH, encoding="utf-8") as f:
+                _faq_text = f.read().strip()
+            if len(_faq_text) > 15000:
+                logger.warning(
+                    "FAQ file is large (%d chars) — may affect response quality",
+                    len(_faq_text),
+                )
+        except OSError as e:
+            logger.error("Could not load FAQ file %s: %s", FAQ_PATH, e)
+            _faq_text = ""
+    return _faq_text
+
+
+def answer_help_question(history: list[dict]) -> str:
+    faq_text = _load_faq()
+    last     = history[-1]
+    messages = history[:-1] + [{
+        "role": "user",
+        "content": (
+            f"MailPilot FAQ:\n{faq_text}\n\n---\n{last['content']}"
+            if faq_text else last["content"]
+        ),
+    }]
     response = client.messages.create(
         model=MODEL,
         max_tokens=500,
@@ -285,63 +305,6 @@ def answer_help_question(history: list[dict], context: list[str] | None = None) 
     )
     return response.content[0].text.strip()
 
-
-_st_model = None
-
-
-def _get_st_model():
-    global _st_model
-    if _st_model is None:
-        from sentence_transformers import SentenceTransformer
-        _st_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _st_model
-
-
-def search_knowledge_base(question: str, top_k: int = 3) -> list[str]:
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-    if not supabase_url or not supabase_key:
-        logger.warning("SUPABASE_URL/SUPABASE_KEY not set — skipping RAG search")
-        return []
-
-    try:
-        import numpy as np
-        from supabase import create_client
-
-        model     = _get_st_model()
-        query_emb = np.array(model.encode(question))
-
-        result = (
-            create_client(supabase_url, supabase_key)
-            .table("documents")
-            .select("content, embedding")
-            .execute()
-        )
-        rows = result.data or []
-        if not rows:
-            logger.debug("RAG: documents table is empty")
-            return []
-
-        scored = []
-        for row in rows:
-            raw     = row["embedding"]
-            doc_emb = np.array(raw if isinstance(raw, list) else json.loads(raw))
-            sim     = float(
-                np.dot(query_emb, doc_emb)
-                / (np.linalg.norm(query_emb) * np.linalg.norm(doc_emb))
-            )
-            scored.append((sim, row["content"]))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        chunks = [content for _, content in scored[:top_k]]
-
-        logger.debug("RAG: %d chunk(s) for %r", len(chunks), question)
-        for i, chunk in enumerate(chunks, 1):
-            logger.debug("  chunk %d: %.80s", i, chunk)
-        return chunks
-    except Exception as e:
-        logger.warning("search_knowledge_base failed: %s", e)
-        return []
 
 
 def score_email(subject: str, body: str, keywords: list[str]) -> dict:
