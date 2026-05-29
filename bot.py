@@ -235,7 +235,7 @@ async def _setup_step2_keywords(update: Update, context: ContextTypes.DEFAULT_TY
 async def _setup_step4_localtime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang         = get_lang(update.effective_user.id, context)
     text         = update.message.text.strip()
-    print(f"DEBUG time input: {repr(text)}")
+
     tz_is_manual = context.user_data.get("tz_is_manual", False)
 
     if tz_is_manual:
