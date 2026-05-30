@@ -79,3 +79,21 @@ Debug needed to see what text is actually received.
 In \_setup_step4_localtime in bot.py, add debug print at start of function:
 print(f"DEBUG time input: {repr(text)}")
 No other changes.
+
+## Bug 8 — Keywords duplicated in /status ⏳ PENDING
+
+**Found during:** post-migration testing
+**Problem:** /status shows "Keywords: Keywords: React..." — word duplicated
+**Cause:** keywords stored in DB already contains "Keywords: " prefix
+
+**Prompt used:**
+Attached: bot.py, strings.py, database.py
+
+Bug: /status shows "Keywords: Keywords: React..." — the word "Keywords" is duplicated.
+
+Show plan first, no code.
+
+1. Find where /status response is built
+2. Find where keywords are saved to DB and retrieved
+3. Identify where the duplication occurs
+4. Propose the minimal fix — one line change only

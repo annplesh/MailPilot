@@ -218,7 +218,7 @@ async def _setup_step1_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def _setup_step2_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang     = get_lang(update.effective_user.id, context)
-    keywords = [kw.strip() for kw in update.message.text.split(",") if kw.strip()]
+    keywords = [kw.strip() for kw in re.sub(r'^(?:keywords|palabras clave)\s*:\s*', '', update.message.text, flags=re.IGNORECASE).split(",") if kw.strip()]
     if not keywords:
         await update.message.reply_text(t(lang, "setup_step2_empty"))
         return SETUP
